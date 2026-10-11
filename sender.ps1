@@ -39,14 +39,31 @@ if (-not (Test-Path -LiteralPath $draftDir)) { Log "FINISH ok | no drafts folder
 
 # ---------- find what Sara approved ----------
 $queue = @()
+$malformed = 0
 foreach ($f in (Get-ChildItem -LiteralPath $draftDir -Filter *.md -EA SilentlyContinue |
                 Where-Object { $_.Name -ne 'README.md' })) {
     $raw = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8
     $meta = @{}
+    $fmOk = $false
     if ($raw -match '(?s)^---\s*(.*?)\s*---') {
+        $fmOk = $true
         foreach ($l in ($matches[1] -split "`n")) {
             if ($l -match '^\s*([a-z_]+)\s*:\s*(.*)$') { $meta[$matches[1]] = $matches[2].Trim() }
         }
+    }
+    # A malformed draft must never look like "nothing to do". Found 2026-10-11:
+    # a file lost its closing --- and the sender reported "nothing approved and
+    # sendable" while an approved reply sat there unsent. Silence is the one
+    # failure mode a send pipeline cannot have.
+    if (-not $fmOk) {
+        Log "MALFORMED $($f.Name): no frontmatter block found. Needs an opening and a closing ---. NOT SENT."
+        $malformed++
+        continue
+    }
+    if (-not $meta.ContainsKey('state')) {
+        Log "MALFORMED $($f.Name): frontmatter has no state: line. NOT SENT."
+        $malformed++
+        continue
     }
     if ($meta['state'] -ne 'approved') { continue }
 
@@ -66,7 +83,10 @@ foreach ($f in (Get-ChildItem -LiteralPath $draftDir -Filter *.md -EA SilentlyCo
     $queue += [PSCustomObject]@{ File=$f.FullName; Name=$f.Name; Meta=$meta; Reply=$reply }
 }
 
-if ($queue.Count -eq 0) { Log "FINISH ok | nothing approved and sendable"; exit 0 }
+if ($queue.Count -eq 0) {
+    if ($malformed -gt 0) { Log "FINISH ok | nothing sendable, but $malformed draft(s) are MALFORMED and need fixing"; exit 0 }
+    Log "FINISH ok | nothing approved and sendable"; exit 0
+}
 Log "$($queue.Count) approved and sendable"
 
 # ---------- report-only mode ----------
