@@ -1,0 +1,10 @@
+﻿secrets.env
+*.env
+!*.env.template
+
+# Never commit: runtime noise and backups
+runner.log
+*.bak
+*.bak-*
+state/
+__pycache__/
